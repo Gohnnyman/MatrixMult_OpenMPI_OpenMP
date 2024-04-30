@@ -19,7 +19,7 @@ utils::Matrix MPProduct(const utils::Matrix &lhs, const utils::Matrix &rhs)
     const auto &lhs_data = lhs.data();
     const auto &rhs_data = rhs.data();
 
-#pragma omp parallel for shared(lhs_data, rhs_data, res_data) default(none) firstprivate(n, m, k)
+#pragma omp parallel for shared(lhs_data, rhs_data, res_data) default(none) firstprivate(n, m, k) num_threads(12)
     for (size_t i = 0; i < n; ++i)
     {
         for (size_t j = 0; j < m; ++j)
