@@ -8,6 +8,9 @@
 
 #include "mpi.h"
 
+const int WORKER_OFFSET = 2;
+const int RESULT_OFFSET = 3;
+
 enum class ProcessClass : int
 {
     Root = 0,
@@ -55,14 +58,15 @@ int SendDataToWorkers(const utils::Matrix &a, const utils::Matrix &b, int proc_n
 
     for (int i = 1; i < proc_num; ++i)
     {
-        MPI_Send(&first_message, sizeof(first_message) / sizeof(int), MPI_INT, i, 3 * i, MPI_COMM_WORLD);
-        MPI_Send(&(a.data()[offset]), rows_per_worker * el_in_row, MPI_INT, i, 3 * i + 1, MPI_COMM_WORLD);
+
+        MPI_Send(&first_message, sizeof(first_message) / sizeof(int), MPI_INT, i, WORKER_OFFSET * i, MPI_COMM_WORLD);
+        MPI_Send(&(a.data()[offset]), rows_per_worker * el_in_row, MPI_INT, i, WORKER_OFFSET * i + 1, MPI_COMM_WORLD);
         offset += rows_per_worker * el_in_row;
     }
 
     auto b_size = (int)(b.size1() * b.size2());
-    auto b_buff = new int[b_size];
-    std::memcpy(b_buff, &(b.data()[0]), b_size);
+    int *b_buff = new int[b_size];
+    std::memcpy(b_buff, &(b.data()[0]), b_size * (sizeof(b.data()[0])));
 
     MPI_Bcast(b_buff, b_size, MPI_INT, 0, MPI_COMM_WORLD);
 
@@ -75,7 +79,7 @@ void Gather(int *res, int num_of_proc, int elements_per_worker)
     MPI_Status status{};
     for (int i = 1; i < num_of_proc; ++i)
     {
-        MPI_Recv(&res[curr_offset], elements_per_worker, MPI_INT, i, 4 * num_of_proc + i, MPI_COMM_WORLD, &status);
+        MPI_Recv(&res[curr_offset], elements_per_worker, MPI_INT, i, RESULT_OFFSET * num_of_proc + i, MPI_COMM_WORLD, &status);
         if (status.MPI_ERROR != MPI_SUCCESS)
         {
             std::cout << "Abort 5, error: " << status.MPI_ERROR << std::endl;
@@ -89,7 +93,7 @@ int *RecvAndHandleData(int id, int &rows, int &columns)
 {
     FirstMessage msg{};
     MPI_Status status{};
-    MPI_Recv(&msg, sizeof(msg) / sizeof(int), MPI_INT, (int)ProcessClass::Root, 3 * id, MPI_COMM_WORLD, &status);
+    MPI_Recv(&msg, sizeof(msg) / sizeof(int), MPI_INT, (int)ProcessClass::Root, WORKER_OFFSET * id, MPI_COMM_WORLD, &status);
     if (status.MPI_ERROR != MPI_SUCCESS)
     {
         std::cout << "Abort 1, error: " << status.MPI_ERROR << std::endl;
@@ -99,7 +103,7 @@ int *RecvAndHandleData(int id, int &rows, int &columns)
     int a_size = msg.rows * msg.shared_side;
     auto a = new int[a_size]{};
 
-    MPI_Recv(a, a_size, MPI_INT, (int)ProcessClass::Root, 3 * id + 1, MPI_COMM_WORLD, &status);
+    MPI_Recv(a, a_size, MPI_INT, (int)ProcessClass::Root, WORKER_OFFSET * id + 1, MPI_COMM_WORLD, &status);
 
     if (status.MPI_ERROR != MPI_SUCCESS)
     {
@@ -142,16 +146,13 @@ int main(int argc, char **argv)
     {
         auto a = utils::ReadMatrixFromFile<utils::MatrixDataType>(argv[1]);
         auto b = utils::ReadMatrixFromFile<utils::MatrixDataType>(argv[2]);
-        if (a.size1() < proc_num * 10)
-        {
-            std::cout << "Matrix is too small!\n";
-            return -4;
-        }
         assert(a.size2() == b.size1());
 
         utils::Benchmark mpi("MPI");
 
         const auto rows_per_worker = (int)a.size1() / (proc_num - 1);
+
+        std::cout << "Rows per worker: " << rows_per_worker << std::endl;
 
         const auto offset = SendDataToWorkers(a, b, proc_num, rows_per_worker);
 
@@ -163,18 +164,28 @@ int main(int argc, char **argv)
                 &a.data()[offset], &b.data()[0], rows,
                 (int)b.size1(), (int)b.size2());
 
-            std::memcpy(&res[offset], handle_offset, rows * b.size2());
+            std::memcpy(&res[offset], handle_offset, rows * b.size2() * sizeof(handle_offset[0]));
             delete[] handle_offset;
         }
         const auto element_per_worker = rows_per_worker * (int)b.size2();
         Gather(res, proc_num, element_per_worker);
+
+        // Print res as matrix
+        for (int i = 0; i < a.size1(); ++i)
+        {
+            for (int j = 0; j < b.size2(); ++j)
+            {
+                std::cout << res[i * b.size2() + j] << " ";
+            }
+            std::cout << std::endl;
+        }
     }
     else
     {
         int rows{0};
         int columns{0};
         int *res = RecvAndHandleData(rank, rows, columns);
-        MPI_Send(res, rows * columns, MPI_INT, (int)ProcessClass::Root, 4 * proc_num + rank, MPI_COMM_WORLD);
+        MPI_Send(res, rows * columns, MPI_INT, (int)ProcessClass::Root, RESULT_OFFSET * proc_num + rank, MPI_COMM_WORLD);
         delete[] res;
     }
 

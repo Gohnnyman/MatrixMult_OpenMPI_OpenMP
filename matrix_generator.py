@@ -1,8 +1,8 @@
 import sys
 import random
 
-MAX_VALUE = 1000000
-MIN_VALUE = -1000000
+MAX_VALUE = 1
+MIN_VALUE = 1
 
 if __name__ == '__main__':
     filename = sys.argv[1]
